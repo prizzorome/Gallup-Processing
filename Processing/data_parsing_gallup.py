@@ -2,6 +2,7 @@ import json
 import csv
 import os
 
+CHOSEN_FILENAME = "10_02__20_15_49_0_gold+rounds+distance" # use this to override the output file name equal to the source file name
 ACTION_COLUMN = 0  # column containing the actions
 ITEM_COLUMN = 3  # column where used mining item is specified
 LEADER_SELECTION_ITEM_COLUMN = 2  # column containing the item selected by the leader
