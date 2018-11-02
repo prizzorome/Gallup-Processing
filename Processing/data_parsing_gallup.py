@@ -2,6 +2,7 @@ import json
 import csv
 import os
 
+CHOSEN_FILENAME = "10_02__20_15_49_0_gold+rounds+distance" # use this to override the output file name equal to the source file name
 ACTION_COLUMN = 0  # column containing the actions
 ITEM_COLUMN = 3  # column where used mining item is specified
 LEADER_SELECTION_ITEM_COLUMN = 2  # column containing the item selected by the leader
@@ -17,6 +18,7 @@ GRID_HALF = 29  # x or y position of the first half of the grid
 GRID_END = 59  # last x or y position of the grid
 SW = NW = range(GRID_START, GRID_HALF + 1)  # second number in range() is exclusive, so we need to increment it by 1
 SE = NE = range(GRID_HALF + 1, GRID_END + 1)  # second number in range() is exclusive, so we need to increment it by 1
+EVENTS_TO_PROCESS = {"gold" , "round" , "distance"} #
 
 # players for testing purposes, to be used with the right dataset:  ["af1585u7p7", "Elrric", "sexog53oz3"]
 PLAYERS = [
@@ -25,8 +27,8 @@ PLAYERS = [
     # "8grfxa3g9n",
     # "tu1tarrriy",
     # "brjhzjrinm",
-     "zvq9c5v9gd",
-     "z58lm8leyw"
+    # "zvq9c5v9gd",
+    # "z58lm8leyw"
 ]
 
 GAME_ACTIONS = [
@@ -243,7 +245,7 @@ def parse_data_to_json_format(csv_reader, data_file):
                     if action == "UseItem":
                         items_used.add(row[ITEM_COLUMN])
 
-                    if action == "FoundGold":
+                    if "gold" in EVENTS_TO_PROCESS and action == "FoundGold":
                         gold_found = int(row[FOUND_GOLD_COLUMN])
                         gold_counter = gold_counter + gold_found
 
@@ -253,9 +255,10 @@ def parse_data_to_json_format(csv_reader, data_file):
                         if remainder == 1.0 or remainder <= 0.05:
                             rounded_gold_counter = rounded_gold_counter + roundup(gold_counter)
                             add_event("gold:", rounded_gold_counter, player,trajectory, action_meaning, None)
+                            print("updated gold for player: " + player + str(rounded_gold_counter))
                             rounded_gold_counter = 0
 
-                    if action == "ArrivedTo":
+                    if "distance" in EVENTS_TO_PROCESS and action == "ArrivedTo":
                         if new_round:
                             # get the player's initial position at the start of the new round
                             initial_position = row[POSITION_COLUMN]
@@ -283,7 +286,7 @@ def parse_data_to_json_format(csv_reader, data_file):
                                 add_event("distance:", rounded_distance_counter, player, trajectory, action_meaning, None)
                                 rounded_distance_counter = 0
 
-                if action == ROUND_SEPARATOR:
+                if "round" in EVENTS_TO_PROCESS and action == ROUND_SEPARATOR:
                     # turn on the flag to get the initial player's position
                     new_round = True
 
@@ -292,6 +295,7 @@ def parse_data_to_json_format(csv_reader, data_file):
                     # and avoid updating the action sequence because rounds are not player's actions
                     if round_counter > 0:
                         add_event("round", round_counter, player, trajectory, None, items_selected)
+                        print("added round event num: " + str(round_counter))
 
                     round_counter = round_counter + 1
                     items_selected.clear()
@@ -379,7 +383,8 @@ def process_data(raw_data_folder, output_folder, action_from_file=True):
         for filename in files:
             # print (os.path.join(rootdir, file))
 
-            file_base = os.path.basename(filename).split('.')[0]
+            # file_base = os.path.basename(filename).split('.')[0]
+            file_base = CHOSEN_FILENAME
             ext = os.path.basename(filename).split('.')[1]
 
             if ext == 'csv':
@@ -389,7 +394,7 @@ def process_data(raw_data_folder, output_folder, action_from_file=True):
                 with open(raw_data_folder + filename, 'rU') as data_file:
                     csv_reader = csv.reader(data_file)
 
-                    # find_players(csv_reader)
+                    find_players(csv_reader)
 
                     viz_data = parse_data_to_json_format(csv_reader, data_file)
                     with open(output_folder + file_base + '.json', 'w') as outfile:
