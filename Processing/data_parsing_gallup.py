@@ -2,7 +2,9 @@ import json
 import csv
 import os
 
-CHOSEN_FILENAME = "10_02__20_15_49_0_gold+rounds+distance" # use this to override the output file name equal to the source file name
+FOCUS = "teams"  # can be "single_players" or "teams"
+EVENTS_TO_PROCESS = {"gold", "round"}  # events to process  , "distance"
+CHOSEN_FILENAME = "0814_noncompetitive_TEAM_gold+rounds+chances"  # use this to override the output file name equal to the source file name
 ACTION_COLUMN = 0  # column containing the actions
 ITEM_COLUMN = 3  # column where used mining item is specified
 LEADER_SELECTION_ITEM_COLUMN = 2  # column containing the item selected by the leader
@@ -18,8 +20,17 @@ GRID_HALF = 29  # x or y position of the first half of the grid
 GRID_END = 59  # last x or y position of the grid
 SW = NW = range(GRID_START, GRID_HALF + 1)  # second number in range() is exclusive, so we need to increment it by 1
 SE = NE = range(GRID_HALF + 1, GRID_END + 1)  # second number in range() is exclusive, so we need to increment it by 1
-EVENTS_TO_PROCESS = {"gold" , "round" , "distance"} #
-
+MINING_TOOLS_PROB_SUCCESS = {
+    "Dynamite":         1,
+    "RDX":              1,
+    "Mine4":            2,
+    "SatchelCharge":    2,
+    "Mine1":            3,
+    "Mine2":            3,
+    "Mine3":            3,
+    "BlackPowder":      4,
+    "TNTbarrel":        4,
+}
 # players for testing purposes, to be used with the right dataset:  ["af1585u7p7", "Elrric", "sexog53oz3"]
 PLAYERS = [
     # "Elrric",
@@ -130,7 +141,7 @@ def roundup(x):
     return x if x % GOLD_INCREASE == 0 else x + GOLD_INCREASE - x % 100
 
 
-def add_event(target_event, counter, player, trajectory, action_meaning, items_selected):
+def add_event(target_event, counter, player, trajectory, action_meaning, items_selected, success_chance):
     """
     :param target_event: the event to look up in the states
     :param counter: the counter we need to associate with the state
@@ -162,7 +173,9 @@ def add_event(target_event, counter, player, trajectory, action_meaning, items_s
                                "",
                                {'event_type': target_event + " "
                                               + str(counter)
-                                              + " - items: "
+                                              + " | avg. chance: "
+                                              + str(success_chance)
+                                              + " | items: "
                                               + ', '.join(str(e) for e in items_selected)
                                 },
                                "",
@@ -181,7 +194,7 @@ def add_event(target_event, counter, player, trajectory, action_meaning, items_s
         action_meaning.append(i)
 
 
-def parse_data_to_json_format(csv_reader, data_file):
+def parse_data_to_json_format(csv_reader, data_file, team):
     """
     parse csv data to create node, link and trajectory
     :param csv_reader: raw csv data
@@ -197,128 +210,215 @@ def parse_data_to_json_format(csv_reader, data_file):
 
     user_count = 0
 
-    # loop over each player
-    for player in PLAYERS:
+    if FOCUS == "single_players":
+        # loop over each player
+        for player in PLAYERS:
 
-        # if player == "z58lm8leyw" or player == "zvq9c5v9gd":
+            # if player == "z58lm8leyw" or player == "zvq9c5v9gd":
 
-            gold_counter = 0
-            rounded_gold_counter = 0
-            round_counter = 0
-            items_selected = set()
-            items_used = set()
-            trajectory = [0]  # initialize with start state
-            action_meaning = ["start_game"]  # used to document the action sequence contained in each trajectory
-            key = ""
-            new_round = False # flag used to get the player position when a new round starts
-            initial_x = 0 # initial x position of the player when a new round starts
-            initial_y = 0  # initial y position of the player when a new round starts
-            distance_covered = 0 # total distance covered by the player while moving
-            rounded_distance_counter = 0 #
+                gold_counter = 0
+                rounded_gold_counter = 0
+                round_counter = 0
+                items_selected = set()
+                items_used = set()
+                trajectory = [0]  # initialize with start state
+                action_meaning = ["start_game"]  # used to document the action sequence contained in each trajectory
+                key = ""
+                new_round = False # flag used to get the player position when a new round starts
+                initial_x = 0 # initial x position of the player when a new round starts
+                initial_y = 0  # initial y position of the player when a new round starts
+                distance_covered = 0 # total distance covered by the player while moving
+                rounded_distance_counter = 0 #
 
-            update_state(0, player)  # update START state with new user id
+                update_state(0, player)  # update START state with new user id
 
-            # initial_position_counter = 0
-            # initial_quadrant = ""
-            # new_quadrant = ""
+                # initial_position_counter = 0
+                # initial_quadrant = ""
+                # new_quadrant = ""
 
-            # initialize a state counter (starting from 2 because 0 and 1 are for the initial and final states respectively)
-            # i = 2
+                # initialize a state counter (starting from 2 because 0 and 1 are for the initial and final states respectively)
+                # i = 2
 
-            # "reset" every time the CSV iterator by resetting the read position of the file object,
-            # otherwise the inner loop processes the csv file only once
-            data_file.seek(0)
+                # "reset" every time the CSV iterator by resetting the read position of the file object,
+                # otherwise the inner loop processes the csv file only once
+                data_file.seek(0)
 
-            # update the player's trajectory by processing each row
-            for row in csv_reader:
+                # update the player's trajectory by processing each row
+                for row in csv_reader:
 
-                action = row[ACTION_COLUMN]
+                    action = row[ACTION_COLUMN]
 
-                if action == "LeaderSelection":
-                    items_selected.add(row[LEADER_SELECTION_ITEM_COLUMN])
+                    if action == "LeaderSelection":
+                        items_selected.add(row[LEADER_SELECTION_ITEM_COLUMN])
 
-                if row[PLAYER_ID_COLUMN] == player:
-                    key += ('_' + action)  # generate the key for the trajectory as a sequence of action strings
-                    # append the action here (NOT when gold is found, otherwise only FoundGold is appended)
-                    action_meaning.append(action)
+                    if row[PLAYER_ID_COLUMN] == player:
+                        key += ('_' + action)  # generate the key for the trajectory as a sequence of action strings
+                        # append the action here (NOT when gold is found, otherwise only FoundGold is appended)
+                        action_meaning.append(action)
 
-                    if action == "UseItem":
-                        items_used.add(row[ITEM_COLUMN])
+                        if action == "UseItem":
+                            items_used.add(row[ITEM_COLUMN])
 
-                    if "gold" in EVENTS_TO_PROCESS and action == "FoundGold":
-                        gold_found = int(row[FOUND_GOLD_COLUMN])
-                        gold_counter = gold_counter + gold_found
+                        if "gold" in EVENTS_TO_PROCESS and action == "FoundGold":
+                            gold_found = int(row[FOUND_GOLD_COLUMN])
+                            gold_counter = gold_counter + gold_found
 
-                        # create a new state every time the total gold amount has increased by DIVISOR (approximate)
-                        rest_of_division = (float(gold_counter) / GOLD_INCREASE) % 1.0
-                        remainder = 1.0 - rest_of_division
-                        if remainder == 1.0 or remainder <= 0.05:
-                            rounded_gold_counter = rounded_gold_counter + roundup(gold_counter)
-                            add_event("gold:", rounded_gold_counter, player,trajectory, action_meaning, None)
-                            print("updated gold for player: " + player + str(rounded_gold_counter))
-                            rounded_gold_counter = 0
-
-                    if "distance" in EVENTS_TO_PROCESS and action == "ArrivedTo":
-                        if new_round:
-                            # get the player's initial position at the start of the new round
-                            initial_position = row[POSITION_COLUMN]
-                            initial_position = initial_position.translate(None, '()').split()
-                            initial_x = int(initial_position[0])
-                            initial_y = int(initial_position[1])
-                            # reset the flag that triggers the getting of the initial position
-                            new_round = False
-                        else:
-                            position = row[POSITION_COLUMN]
-                            position = position.translate(None, '()').split()
-                            print("player " + player + " position: " + str(position))
-                            x = int(position[0])
-                            y = int(position[1])
-                            distance_covered = distance_covered + abs(x - initial_x) + abs(y - initial_y)
-                            initial_x = x
-                            initial_y = y
-                            print("distance_covered: " + str(distance_covered))
-
-                            # create a new state every time the total distance has increased by DIVISOR (approximate)
-                            rest_of_division = (float(distance_covered) / DISTANCE_INCREASE) % 1.0
+                            # create a new state every time the total gold amount has increased by DIVISOR (approximate)
+                            rest_of_division = (float(gold_counter) / GOLD_INCREASE) % 1.0
                             remainder = 1.0 - rest_of_division
-                            if remainder == 1.0 or remainder <= 0.02:
-                                rounded_distance_counter = rounded_distance_counter + roundup(distance_covered)
-                                add_event("distance:", rounded_distance_counter, player, trajectory, action_meaning, None)
-                                rounded_distance_counter = 0
+                            if remainder == 1.0 or remainder <= 0.05:
+                                rounded_gold_counter = rounded_gold_counter + roundup(gold_counter)
+                                add_event("gold:", rounded_gold_counter, player,trajectory, action_meaning, None, None)
+                                print("updated gold for player: " + player + " - " + str(rounded_gold_counter))
+                                rounded_gold_counter = 0
 
-                if "round" in EVENTS_TO_PROCESS and action == ROUND_SEPARATOR:
-                    # turn on the flag to get the initial player's position
-                    new_round = True
+                        if "distance" in EVENTS_TO_PROCESS and action == "ArrivedTo":
+                            if new_round:
+                                # get the player's initial position at the start of the new round
+                                initial_position = row[POSITION_COLUMN]
+                                initial_position = initial_position.translate(None, '()').split()
+                                initial_x = int(initial_position[0])
+                                initial_y = int(initial_position[1])
+                                # reset the flag that triggers the getting of the initial position
+                                new_round = False
+                            else:
+                                position = row[POSITION_COLUMN]
+                                position = position.translate(None, '()').split()
+                                print("player " + player + " position: " + str(position))
+                                x = int(position[0])
+                                y = int(position[1])
+                                distance_covered = distance_covered + abs(x - initial_x) + abs(y - initial_y)
+                                initial_x = x
+                                initial_y = y
+                                print("distance_covered: " + str(distance_covered))
 
-                    # start creating new states based on rounds after the first gold_setup (because the very first one
-                    # occurs at the beginning of the game)
-                    # and avoid updating the action sequence because rounds are not player's actions
-                    if round_counter > 0:
-                        add_event("round", round_counter, player, trajectory, None, items_selected)
-                        print("added round event num: " + str(round_counter))
+                                # create a new state every time total distance has increased by DIVISOR (approximate)
+                                rest_of_division = (float(distance_covered) / DISTANCE_INCREASE) % 1.0
+                                remainder = 1.0 - rest_of_division
+                                if remainder == 1.0 or remainder <= 0.02:
+                                    rounded_distance_counter = rounded_distance_counter + roundup(distance_covered)
+                                    add_event("distance:", rounded_distance_counter, player, trajectory, action_meaning, None, None)
+                                    rounded_distance_counter = 0
 
-                    round_counter = round_counter + 1
-                    items_selected.clear()
+                    if "round" in EVENTS_TO_PROCESS and action == ROUND_SEPARATOR:
+                        # turn on the flag to get the initial player's position
+                        new_round = True
 
-            trajectory.append(1)  # end state
-            update_state(1, player)  # update end state with the new user id
-            action_meaning.append("end_game")
+                        # start creating new states based on rounds after the first gold_setup (because the very first one
+                        # occurs at the beginning of the game)
+                        # and avoid updating the action sequence because rounds are not player's actions
+                        if round_counter > 0:
+                            add_event("round", round_counter, player, trajectory, None, items_selected, None)
+                            print("added round event num: " + str(round_counter))
 
-            add_links(trajectory, player)
+                        round_counter = round_counter + 1
+                        items_selected.clear()
 
-            user_ids = [player]
+                trajectory.append(1)  # end state
+                update_state(1, player)  # update end state with the new user id
+                action_meaning.append("end_game")
 
-            if key in TRAJECTORIES:
-                TRAJECTORIES[key]['user_ids'].append(player)
-            else:
-                TRAJECTORIES[key] = {'trajectory': trajectory,
-                                     'action_meaning': action_meaning,
-                                     'user_ids': user_ids,
-                                     'id': key,
-                                     'completed': True}
+                add_links(trajectory, player)
 
-            # NOTE: the user_count is NOT updated in the original code, but I thought it should be
-            user_count = user_count + 1
+                user_ids = [player]
+
+                if key in TRAJECTORIES:
+                    TRAJECTORIES[key]['user_ids'].append(player)
+                else:
+                    TRAJECTORIES[key] = {'trajectory': trajectory,
+                                         'action_meaning': action_meaning,
+                                         'user_ids': user_ids,
+                                         'id': key,
+                                         'completed': True}
+
+                # NOTE: the user_count is NOT updated in the original code, but I thought it should be
+                user_count = user_count + 1
+
+    elif FOCUS == "teams":
+        # loop over each team
+        # for player in PLAYERS:
+        rounded_gold_counter = 0
+        round_counter = 0
+        items_selected = []
+        num_of_items = 0
+        sum_of_item_success_chances = 0
+        trajectory = [0]  # initialize with start state
+        action_meaning = ["start_game"]  # used to document the action sequence contained in each trajectory
+        key = ""
+
+        update_state(0, team)  # update START state with new user id
+
+        # "reset" every time the CSV iterator by resetting the read position of the file object,
+        # otherwise the inner loop processes the csv file only once
+        data_file.seek(0)
+
+        # update the team's trajectory by processing each row
+        for row in csv_reader:
+
+            action = row[ACTION_COLUMN]
+
+            if round_counter > 0 and action == "LeaderSelection":
+                item = row[LEADER_SELECTION_ITEM_COLUMN]
+                items_selected.append(item)
+                if item in MINING_TOOLS_PROB_SUCCESS:
+                    num_of_items = num_of_items + 1
+                    sum_of_item_success_chances = sum_of_item_success_chances + MINING_TOOLS_PROB_SUCCESS[item]
+
+            # TODO: use FoundGold instead of TotalGold
+            if "gold" in EVENTS_TO_PROCESS and action == "TotalGold":
+                gold_counter = int(row[TOTAL_GOLD_COLUMN])
+
+                if gold_counter >= GOLD_INCREASE:
+                    # create a new state every time the total gold amount has increased by DIVISOR (approximate)
+                    rest_of_division = (float(gold_counter) / GOLD_INCREASE) % 1.0
+                    remainder = 1.0 - rest_of_division
+                    if remainder == 1.0 or remainder <= 0.05:
+                        rounded_gold_counter = rounded_gold_counter + roundup(gold_counter)
+                        add_event("gold:", rounded_gold_counter, team, trajectory, action_meaning, None, None)
+                        print("updated gold for team: " + str(team) + " - " + str(rounded_gold_counter))
+                        rounded_gold_counter = 0
+
+            if "round" in EVENTS_TO_PROCESS and action == ROUND_SEPARATOR:
+
+                key += ('_' + action)  # generate the key for the trajectory as a sequence of action strings
+                # append the action here (NOT when gold is found, otherwise only FoundGold is appended)
+                action_meaning.append(action)
+
+                # start creating new states based on rounds after first gold_setup (because
+                # the very first gold_setup occurs at the beginning of the game)
+                # and avoid updating the action sequence because rounds are not player's actions
+                if round_counter > 0:
+                    # compute the average chance of success and then reset its components
+                    average_item_success_chance = round(float(sum_of_item_success_chances) / float(num_of_items), 1)
+                    num_of_items = 0
+                    sum_of_item_success_chances = 0
+                    # add the event
+                    add_event("round", round_counter, team, trajectory, None, items_selected, average_item_success_chance)
+                    print("added round event num: " + str(round_counter))
+
+                round_counter = round_counter + 1
+
+                items_selected = []
+
+        trajectory.append(1)  # end state
+        update_state(1, team)  # update end state with the new user id
+        action_meaning.append("end_game")
+
+        add_links(trajectory, team)
+
+        user_ids = [team]
+
+        if key in TRAJECTORIES:
+            TRAJECTORIES[key]['user_ids'].append(team)
+        else:
+            TRAJECTORIES[key] = {'trajectory': trajectory,
+                                 'action_meaning': action_meaning,
+                                 'user_ids': user_ids,
+                                 'id': key,
+                                 'completed': True}
+
+        # NOTE: the user_count is NOT updated in the original code, but I thought it should be
+        user_count = user_count + 1
 
     # generate lists from dictionaries
     state_list = list(STATES.values())
@@ -372,38 +472,46 @@ def find_players(csv_reader):
 def process_data(raw_data_folder, output_folder, action_from_file=True):
     """
     process each csv file to create the json file for glyph
-    :param filename: input csv file
+    :param raw_data_folder: folder containing raw data files
+    :param output_folder: output folder
     :param action_from_file: if True then finds the actions names from the file; if False then the actions should be
     manually set in the game_actions variable in main
     :return:
     """
 
+    create_initial_and_final_states()
+
+
     for subdir, dirs, files in os.walk(raw_data_folder):
-        ind = 1
+        ind = 0
         for filename in files:
             # print (os.path.join(rootdir, file))
 
-            # file_base = os.path.basename(filename).split('.')[0]
-            file_base = CHOSEN_FILENAME
+            # output_file = os.path.basename(filename).split('.')[0]
+            output_file = CHOSEN_FILENAME
             ext = os.path.basename(filename).split('.')[1]
 
             if ext == 'csv':
-                print(ind, ":", file_base)
-                file_names_list.append(file_base)
+                print(ind, ":", output_file)
+                file_names_list.append(output_file)
 
                 with open(raw_data_folder + filename, 'rU') as data_file:
                     csv_reader = csv.reader(data_file)
 
-                    find_players(csv_reader)
+                    if FOCUS == "single_players":
+                        find_players(csv_reader)
 
-                    viz_data = parse_data_to_json_format(csv_reader, data_file)
-                    with open(output_folder + file_base + '.json', 'w') as outfile:
-                        json.dump(viz_data, outfile)
-                        outfile.close()
+                    viz_data = parse_data_to_json_format(csv_reader, data_file, ind)
 
-                    print('\tDone writing to : ' + file_base + '.json')
+                    print('\tDone writing to : ' + output_file + '.json')
+                    ind += 1
 
-            ind += 1
+    # moved next WITH clause out of the loop
+    with open(output_folder + output_file + '.json', 'w') as outfile:
+        json.dump(viz_data, outfile)
+        outfile.close()
+
+
 
 
 def create_game_action_dict(actions):
@@ -421,7 +529,7 @@ def create_game_action_dict(actions):
 if __name__ == "__main__":
     # manually set actions
 
-    create_game_action_dict(GAME_ACTIONS)
+    # create_game_action_dict(GAME_ACTIONS)
     # print(ACTIONS)
 
     raw_data_folder = "../data/raw/"
@@ -439,174 +547,3 @@ if __name__ == "__main__":
         json.dump(file_names_list, outfile)
         outfile.close()
         print("\nvisualization_ids.json file generated.")
-
-
-# CODE TO PROCESS POSITION CHANGE BETWEEN QUADRANTS (commented because it produces too many states)
-#
-# def quadrant(x, y):
-#     """
-#     returns the quadrant where the player is located
-#     :param x: string
-#     :param y: string
-#     :return: string
-#     """
-#     if x in SW:
-#         if y in SW:
-#             return "SW"
-#         else:
-#             return "NW"
-#     elif x in SE:
-#         if y in SE:
-#             return "SE"
-#         else:
-#             return "NE"
-#     else:
-#         return "SOMETHING WENT WRONG"
-#
-# if initial_position_counter == 0 and action == "SetDestination":
-#     initial_position = row[POSITION_COLUMN]
-#     initial_position = initial_position.translate(None, '()').split()
-#     print("player " + player + " initial position: " + str(initial_position))
-#     x = int(initial_position[0])
-#     y = int(initial_position[1])
-#
-#     initial_quadrant = quadrant(x,y)
-#
-#     print ("initial_quadrant: " + initial_quadrant)
-#     #  increment the counter to compute the initial position just once
-#     initial_position_counter = initial_position_counter + 1
-#
-# if action == "ArrivedTo":
-#     position = row[POSITION_COLUMN]
-#     position = position.translate(None, '()').split()
-#     print("player " + player + " position: " + str(position))
-#     x = int(position[0])
-#     y = int(position[1])
-#
-#     new_quadrant = quadrant(x, y)
-#
-#     if new_quadrant != initial_quadrant:
-#         print("------ new_quadrant: " + str(new_quadrant))
-#         initial_quadrant = new_quadrant
-#
-#     if new_quadrant == "":
-#         print("++++++++++ EMPTY QUADRANT")
-
-
-# -------------- initial code to update gold-based states
-# initialize the index of a possibly existing state
-# index = -1
-# for key_iterator, value in STATES.items():
-#     value_list = value['details']['event_type'].split()
-#     event_name = value_list[0]
-#
-#     # if an event with a given name and value exists, get its index
-#     if event_name == "gold:":
-#         event_number = int(value_list[1])
-#         if event_number == rounded_gold_counter:
-#             index = key_iterator
-#             break
-#
-# # if the state already exists update it, otherwise create and append it after the last state
-# i = index if index > 0 else STATES.__len__()
-#
-# create_or_update_state(i,
-#                            "mid",
-#                            "",
-#                            {'event_type': "gold: " + str(rounded_gold_counter)},
-#                            "",
-#                            player)
-
-# trajectory.append(i)
-# action_meaning.append(i)
-
-# old increase of the counter
-# i = i + 1
-
-
-# ------------------------- initial code to update states based on distance traversed
-
-# index = -1
-# for key_iterator, value in STATES.items():
-#     value_list = value['details']['event_type'].split()
-#     event_name = value_list[0]
-#
-#     if event_name == "distance:":
-#         event_number = int(value_list[1])
-#         if event_number == rounded_distance_counter:
-#             index = key_iterator
-#             break
-#
-# # if the state already exists update it, otherwise create it after the last state
-# i = index if index > 0 else STATES.__len__()
-#
-# create_or_update_state(i,
-#                        "mid",
-#                        "",
-#                        {'event_type': "distance: " + str(rounded_distance_counter)},
-#                        "",
-#                        player)
-#
-# print("------ new state about rounded distance covered: " + str(rounded_distance_counter))
-#
-# trajectory.append(i)
-# action_meaning.append(i)
-
-
-# ----------------------- initial code to update states based on rounds
-# create a state based on the new round
-# index = -1
-# for key_iterator, value in STATES.items():
-#     value_list = value['details']['event_type'].split()
-#     event_name = value_list[0]
-#
-#     if event_name == "round":
-#         event_number = int(value_list[1])
-#         if event_number == round_counter:
-#             index = key_iterator
-#             break
-#
-# # if the state already exists update it, otherwise create it after the last state
-# i = index if index > 0 else STATES.__len__()
-#
-# create_or_update_state(i,
-#                        "round",
-#                        "",
-#                        {'event_type': "round "
-#                                       + str(round_counter)
-#                                       + " - items: "
-#                                       + ', '.join(str(e) for e in items_selected)
-#                         },
-#                        "",
-#                        player)
-# # print("----------- UPDATED STATE NUM. " + str(index))
-# # print("----------- STATES[" + str(index) + "]: " + str(STATES[index]))
-# # print("rounded_gold_counter: " + str(rounded_gold_counter))
-# trajectory.append(i)
-
-
-
-# ---------------------------
-#  OLD VERSION OF ROUND COUNTING: create a new state every time a new round has started
-# if action == ROUND_SEPARATOR:
-#     if round_counter > 0:
-#         next_state_index = STATES.__len__()
-#         create_or_update_state(next_state_index,
-#                                "round",
-#                                "",
-#                                {'event_type': "round "
-#                                               + str(round_counter)
-#                                               + " - items: "
-#                                               + ', '.join(str(e) for e in items_selected)
-#                                 },
-#                                "",
-#                                player)
-#
-#         print("round_counter: " + str(round_counter))
-#         print(', '.join(str(e) for e in items_selected))
-#
-#         trajectory.append(next_state_index)  # append state to the trajectory
-#         # i = i + 1
-#
-#     round_counter = round_counter + 1
-#     items_selected.clear()
