@@ -585,6 +585,7 @@ def parse_data_to_json_format(csv_reader, data_file):
 
     # compute similarities among trajectories (possibly on the basis of simple criteria)
     # ------ FOR JIMMY: next line can be commented and replaced with a call to your function
+    # Jimmy test
     traj_similarity = compute_similarities()
 
     # return the results
