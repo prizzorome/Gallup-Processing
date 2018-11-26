@@ -513,6 +513,7 @@ def parse_data_to_json_format(csv_reader, data_file):
                         else:
                             risk = "low"
                         # print("-------------- SELECTED item risk: " + risk)
+                        print("item1_prob: " + str(item1_prob) + ", " "item2_prob: " + str(item2_prob))
 
                         # num_of_items = num_of_items + 1
                         # probability_quotient = float(MINING_TOOLS[item]) / mining_tools_prob_sum
@@ -582,6 +583,22 @@ def parse_data_to_json_format(csv_reader, data_file):
     link_list = list(LINKS.values())
     trajectory_list = list(TRAJECTORIES.values())
 
+    # compute similarities among trajectories (possibly on the basis of simple criteria)
+    # ------ FOR JIMMY: next line can be commented and replaced with a call to your function
+    traj_similarity = compute_similarities()
+
+    # return the results
+    return {'level_info': 'Visualization',
+            'num_patterns': TARGET_COUNT,
+            'num_users': TARGET_COUNT,
+            'nodes': state_list,
+            'links': link_list,
+            'trajectories': trajectory_list,
+            'traj_similarity': traj_similarity,
+            'setting': 'test'}
+
+
+def compute_similarities():
     # compute distances between trajectories
     similarity_criterium = "GoldSetup"
     traj_similarity = []
@@ -601,11 +618,11 @@ def parse_data_to_json_format(csv_reader, data_file):
                     quantity_j = TRAJECTORIES.values()[j]['action_meaning'].count(similarity_criterium)
                     sim = abs(quantity_i - quantity_j)
 
-                    print("...... quantity_i: " + str(quantity_i))
-                    print("...... quantity_j: " + str(quantity_j))
-                    print("...... diff: " + str(sim))
-
-                    print("...... similarity: " + str(sim))
+                    # print("...... quantity_i: " + str(quantity_i))
+                    # print("...... quantity_j: " + str(quantity_j))
+                    # print("...... diff: " + str(sim))
+                    #
+                    # print("...... similarity: " + str(sim))
 
                     traj_similarity.append({'id': str(similarity_id),
                                            'source': i,
@@ -613,22 +630,13 @@ def parse_data_to_json_format(csv_reader, data_file):
                                            'similarity': sim
                                            })
 
-                    print("...... traj_similarity[similarity_id]: " + str(traj_similarity[similarity_id]))
+                    # print("...... traj_similarity[similarity_id]: " + str(traj_similarity[similarity_id]))
                     similarity_id += 1
 
                     if sim < similarity_threshold and j not in skipped_traj_ids:
-                        print "------------ Skipping: %d" % j
+                        # print "------------ Skipping: %d" % j
                         skipped_traj_ids.append(j)
-
-    # return the results
-    return {'level_info': 'Visualization',
-            'num_patterns': TARGET_COUNT,
-            'num_users': TARGET_COUNT,
-            'nodes': state_list,
-            'links': link_list,
-            'trajectories': trajectory_list,
-            'traj_similarity': traj_similarity,
-            'setting': 'test'}
+    return traj_similarity
 
 
 def find_actions(csv_reader):
