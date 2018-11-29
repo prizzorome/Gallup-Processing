@@ -164,13 +164,13 @@ def parse_data_to_json_format(csv_reader, data_file):
 
             # stop when the round ends
             # TODO: do this when the SECOND round separator is met, because GoldSetup is also used at the beginning!
-            # if row[ACTION_COLUMN] == "GoldSetup":
+            # if row[EVENT_COLUMN] == "GoldSetup":
             #     break
 
                 # use next nested IFs as a starting point to process only the rows concerning a specific round
             # (for details about how to proceed after the second IF, see:
             # https://python-forum.io/Thread-How-to-Loop-CSV-File-Beginning-at-Specific-Row)
-            # if row[ACTION_COLUMN] == ROUND_SEPARATOR:
+            # if row[EVENT_COLUMN] == ROUND_SEPARATOR:
             #     round_counter = round_counter +1
             #
             #     if round_counter <= TARGET_ROUND_NUMBER: # for now we assume that the target round is the first one
