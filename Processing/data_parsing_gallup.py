@@ -26,7 +26,7 @@ DISTANCE_INCREASE = 100  # when a new state based on the distance traversed has 
 RISK_THRESHOLD_LOW = 0.50  # used to select the set a selected item belongs to
 RISK_THRESHOLD_MEDIUM = 0.70  # used to select the set a selected item belongs to
 PROCESS_CURRENT_TEAM = True  # used to skip the rest of a team file containing "GameSuspended"
-
+INFINITE_DISTANCE = 22 # used to define the maximum distance in dynamic time warping algrithm
 MINING_TOOLS = {}  # dictionary of mining tools available to the team, with their probability of success
 # manual settings, if needed:
 # "Dynamite":         1,
@@ -348,6 +348,110 @@ def process_single_players(input_file, file_reader):
         # clear the mining tools
         MINING_TOOLS.clear()
 
+def is_start_or_end(state):
+    return state['details']['event_type'] == 'start' or state['details']['event_type'] == 'end'
+def isRoundNode(state):
+    return state['type'] == 'round'
+
+def get_state_diff(state1, state2):
+    """
+        Dependent on action types and raw actions only.
+        Return the difference between two states. Each state is represented
+        as a 3-tuple involving (stage, action, action parameter)
+
+        Skill difference: 10
+        Phase difference: 5
+        action difference: 1
+    """
+
+    # 1. if different stages, it's the max value
+    #     if state1[0] != state2[0]:
+    #         return state_diff_infinity
+    #
+    if is_start_or_end(state1) or is_start_or_end(state2):
+        if state1 == state2:
+            return 0
+        else:
+            return INFINITE_DISTANCE
+    if isRoundNode(state1) or isRoundNode(state2):
+        if state1 == state2:
+            return 0
+        else:
+            return INFINITE_DISTANCE
+
+    # 2. No start end involved
+    diff = 0
+    # different Activity means different screens: diff is 1
+    if state1['round'] != state2['round']:
+        return INFINITE_DISTANCE
+
+    # # additional considerations can be done here
+    elif state1['details']['event_type'] != state2['details']['event_type']:
+        diff += 5
+    # else:
+    #     diff += 1
+
+    return diff
+
+def compute_dtw(traj1, traj2):
+    """
+        Compute DTW of traj1 and traj2
+        States are the important factors
+
+    """
+    states1 = traj1
+    states2 = traj2
+    #     print 'states1 = %r' %states1
+    #     print 'states2 = %r' %states2
+
+    n = len(states1)
+    m = len(states2)
+    DTW = []
+    for i in range(0, n + 1):
+        DTW.append([])
+        for j in range(0, m + 1):
+            DTW[i].append(22)
+
+
+    DTW[0][0] = 0
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+
+            cost = get_state_diff(STATES[states1[i - 1]], STATES[states2[j - 1]])
+            DTW[i][j] = cost + min(DTW[i - 1][j], DTW[i][j - 1], DTW[i - 1][j - 1])
+
+    return DTW[n][m]
+
+
+def BuildTrajctoriesSimilarity():
+
+    # traj_id now play the role of similarity ID
+    similarity_id = 0
+
+    # skipped_traj_ids stores the trajectories that are too close to some trajectories
+    # thus need not be recomputed
+    skipped_traj_ids = []
+
+    for i in range(len(TRAJECTORIES) - 1):
+        if i not in skipped_traj_ids:
+            assert i == int(TRAJECTORIES[i]['id'])  ## str to int for asserting
+
+            for j in range(i + 1, len(TRAJECTORIES)):
+                assert j == int(TRAJECTORIES[j]['id'])
+
+                sim = compute_dtw(TRAJECTORIES[i]['trajectory'],
+                                  TRAJECTORIES[j]['trajectory'])
+
+                TRAJSIMILARITY[similarity_id] = {'id': str(similarity_id),  ## similarity_id replaced with str(similarity_id)
+                                       'source': TRAJECTORIES[i]['id'],  ## these ids are already str
+                                       'target': TRAJECTORIES[j]['id'],
+                                       'similarity': sim
+                                       }
+                similarity_id += 1
+
+                if sim < 3 and j not in skipped_traj_ids:
+                    skipped_traj_ids.append(j)
+
 
 def parse_data_to_json_format(csv_reader, data_file):
     """
@@ -586,7 +690,8 @@ def parse_data_to_json_format(csv_reader, data_file):
     # compute similarities among trajectories (possibly on the basis of simple criteria)
     # ------ FOR JIMMY: next line can be commented and replaced with a call to your function
     # Jimmy test
-    traj_similarity = compute_similarities()
+    # traj_similarity = compute_similarities()
+    traj_similarity = BuildTrajctoriesSimilarity()
 
     # return the results
     return {'level_info': 'Visualization',
