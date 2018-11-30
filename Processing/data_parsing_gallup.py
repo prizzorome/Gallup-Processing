@@ -1,4 +1,3 @@
-from __future__ import print_function  # needed to print without newline, imported from Python 3.x
 import json
 import csv
 import os
@@ -6,9 +5,7 @@ import statistics
 
 FOCUS = "teams"  # can be "single_players" or "teams"
 FILE_SEPARATOR = ".csv"  # input files must have the .csv extension, otherwise the csv reader does not work
-EVENTS_TO_PROCESS = {"round+risk"}  # events that can be processed:
-# "gold", "round", "distance", "risk", "voting_st_dev", "risk_aversion", "round+risk"
-SIMPLE_STATE_CRITERION = False  # used to determine which add_event function to use
+EVENTS_TO_PROCESS = {"risk"}  # events that can be processed: "gold", "round", "distance", "risk", "voting_st_dev", "risk_aversion"
 CHOSEN_FILENAME = ""  # write a string to override the output file name equal to the source file name
 EVENT_COLUMN = 0  # column containing the events (including player actions)
 ITEM_NAME_COLUMN = 2  # column where items' names are written during setup
@@ -29,7 +26,7 @@ DISTANCE_INCREASE = 100  # when a new state based on the distance traversed has 
 RISK_THRESHOLD_LOW = 0.50  # used to select the set a selected item belongs to
 RISK_THRESHOLD_MEDIUM = 0.70  # used to select the set a selected item belongs to
 PROCESS_CURRENT_TEAM = True  # used to skip the rest of a team file containing "GameSuspended"
-
+INFINITE_DISTANCE = 22 # used to define the maximum distance in dynamic time warping algrithm
 MINING_TOOLS = {}  # dictionary of mining tools available to the team, with their probability of success
 # manual settings, if needed:
 # "Dynamite":         1,
@@ -158,7 +155,7 @@ def roundup(x):
     return x if x % GOLD_INCREASE == 0 else x + GOLD_INCREASE - x % 100
 
 
-def add_event(event, quantity, target, trajectory, action_sequence, items_selected = None, success_chance = None):
+def add_event(event, quantity, target, trajectory, action_sequence, items_selected, success_chance):
     """
     :param event: the event to look up in the states
     :param quantity: the quantity we need to associate with the state
@@ -212,44 +209,6 @@ def add_event(event, quantity, target, trajectory, action_sequence, items_select
                                {'event_type': event + " " + str(quantity)},
                                "",
                                target)
-
-    trajectory.append(i)
-    if action_sequence:
-        action_sequence.append(i)
-
-
-def add_event_string_based(event, event_type, target, trajectory, action_sequence):
-    """
-    :param event: the event to look up in the states
-    :param event_type: the type of event ("mid" vs others, e.g. "round"), used to visualize nodes differently
-    :param target: the target player or team
-    :param trajectory: the trajectory to update
-    :param action_sequence: the sequence of actions to update
-    :return:
-    """
-    # since this may be the first time an actual state is created for this target,
-    # add the target to the START state if it's not yet there:
-    # this way we avoid sequence nodes that only go from START to END
-    add_target_to_state(0, target)
-
-    index = -1
-    for key_iterator, value in STATES.items():
-        existing_event_name = value['details']['event_type']
-
-        # found an existing event: use its index
-        if existing_event_name == event:
-            index = key_iterator
-            break
-
-    # if the state already exists update it, otherwise create and append it after the last state
-    i = index if index > 0 else STATES.__len__()
-
-    create_or_update_state(i,
-                           event_type,
-                           "",
-                           {'event_type': event},
-                           "",
-                           target)
 
     trajectory.append(i)
     if action_sequence:
@@ -389,6 +348,114 @@ def process_single_players(input_file, file_reader):
         # clear the mining tools
         MINING_TOOLS.clear()
 
+def is_start_or_end(state):
+    return state['details']['event_type'] == 'start' or state['details']['event_type'] == 'end'
+def isRoundNode(state):
+    return state['type'] == 'round'
+
+def get_state_diff(state1, state2):
+    """
+        Dependent on action types and raw actions only.
+        Return the difference between two states. Each state is represented
+        as a 3-tuple involving (stage, action, action parameter)
+
+        Skill difference: 10
+        Phase difference: 5
+        action difference: 1
+    """
+
+    # 1. if different stages, it's the max value
+    #     if state1[0] != state2[0]:
+    #         return state_diff_infinity
+    #
+    if is_start_or_end(state1) or is_start_or_end(state2):
+        if state1 == state2:
+            return 0
+        else:
+            return INFINITE_DISTANCE
+    if isRoundNode(state1) or isRoundNode(state2):
+        if state1 == state2:
+            return 0
+        else:
+            return INFINITE_DISTANCE
+
+    # 2. No start end involved
+    diff = 0
+    # different Activity means different screens: diff is 1
+    ###### Problem here: I have a field specify this node belongs which round.
+    ###### So I can compare nodes only in the same round.
+    ###### But it seems that you do not have this field.
+    ###### So what should we do with this?
+    # if state1['round'] != state2['round']:
+    #     return INFINITE_DISTANCE
+
+    # # additional considerations can be done here
+    elif state1['details']['event_type'] != state2['details']['event_type']:
+        diff += 5
+    # else:
+    #     diff += 1
+
+    return diff
+
+def compute_dtw(traj1, traj2):
+    """
+        Compute DTW of traj1 and traj2
+        States are the important factors
+
+    """
+    states1 = traj1
+    states2 = traj2
+    #     print 'states1 = %r' %states1
+    #     print 'states2 = %r' %states2
+
+    n = len(states1)
+    m = len(states2)
+    DTW = []
+    for i in range(0, n + 1):
+        DTW.append([])
+        for j in range(0, m + 1):
+            DTW[i].append(22)
+
+
+    DTW[0][0] = 0
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+
+            cost = get_state_diff(STATES[states1[i - 1]], STATES[states2[j - 1]])
+            DTW[i][j] = cost + min(DTW[i - 1][j], DTW[i][j - 1], DTW[i - 1][j - 1])
+
+    return DTW[n][m]
+
+
+def BuildTrajctoriesSimilarity():
+
+    # traj_id now play the role of similarity ID
+    similarity_id = 0
+
+    # skipped_traj_ids stores the trajectories that are too close to some trajectories
+    # thus need not be recomputed
+    skipped_traj_ids = []
+
+    for i in range(len(TRAJECTORIES) - 1):
+        if i not in skipped_traj_ids:
+            assert i == int(TRAJECTORIES[i]['id'])  ## str to int for asserting
+
+            for j in range(i + 1, len(TRAJECTORIES)):
+                assert j == int(TRAJECTORIES[j]['id'])
+
+                sim = compute_dtw(TRAJECTORIES[i]['trajectory'],
+                                  TRAJECTORIES[j]['trajectory'])
+
+                TRAJSIMILARITY[similarity_id] = {'id': str(similarity_id),  ## similarity_id replaced with str(similarity_id)
+                                       'source': TRAJECTORIES[i]['id'],  ## these ids are already str
+                                       'target': TRAJECTORIES[j]['id'],
+                                       'similarity': sim
+                                       }
+                similarity_id += 1
+
+                if sim < 3 and j not in skipped_traj_ids:
+                    skipped_traj_ids.append(j)
+
 
 def parse_data_to_json_format(csv_reader, data_file):
     """
@@ -417,10 +484,10 @@ def parse_data_to_json_format(csv_reader, data_file):
         selected_items_quotient_sum = 0
         num_of_items = 0
         item1 = ""
+        item2 = ""
         item1_prob = 0
         item2_prob = 0
         voted_items = []
-        selected_probabilities = []
         initial_team = ""
 
         # initialize trajectory, action sequence and key
@@ -456,9 +523,6 @@ def parse_data_to_json_format(csv_reader, data_file):
                         # clear the mining tools
                         MINING_TOOLS.clear()
 
-                        # temporary
-                        print_risk_sequences(selected_probabilities)
-
                     # reinitialize variables
                     gold_counter = 0
                     round_counter = 1
@@ -470,7 +534,6 @@ def parse_data_to_json_format(csv_reader, data_file):
                     item1_prob = 0
                     item2_prob = 0
                     voted_items = []
-                    selected_probabilities = []
 
                     # reinitialize trajectory, action sequence and key
                     trajectory = [0]  # initialize with start state
@@ -489,10 +552,11 @@ def parse_data_to_json_format(csv_reader, data_file):
 
                 if event == "ItemSetup":
                     MINING_TOOLS[row[ITEM_COLUMN]] = row[ITEM_PROBABILITY_COLUMN]
+
                     # print ("MINING_TOOLS: " + str(MINING_TOOLS))
                 elif event == "MineSetup":
                     prob_string = row[ITEM_PROBABILITY_COLUMN]
-                    # mines have a min and max probability of success: we store their average in MINING_TOOLS
+                    # mines have a min and max probability of success: we store their mean in MINING_TOOLS
                     prob_list = prob_string.translate(None, '()').split()
                     floor = float(prob_list[0])
                     ceiling = float(prob_list[1])
@@ -556,17 +620,18 @@ def parse_data_to_json_format(csv_reader, data_file):
                             risk = "high"
                         else:
                             risk = "low"
-                        selected_probabilities.append(risk)
                         # print("-------------- SELECTED item risk: " + risk)
-                        # print("item1_prob: " + str(item1_prob) + ", " "item2_prob: " + str(item2_prob))
+                        print("item1_prob: " + str(item1_prob) + ", " "item2_prob: " + str(item2_prob))
 
+                        # num_of_items = num_of_items + 1
+                        # probability_quotient = float(MINING_TOOLS[item]) / mining_tools_prob_sum
+                        # selected_items_quotient_sum = selected_items_quotient_sum + probability_quotient
+                        # selection_counter = selection_counter + 1
+                        # print("... probability_quotient: " + str(probability_quotient))
+                        # print("... sum of probability quotients: " + str( selected_items_quotient_sum))
                         if "risk" in EVENTS_TO_PROCESS and risk != "":
-                            if SIMPLE_STATE_CRITERION:
-                                event_to_add = "r" + str(round_counter) + ":" + "risk " + risk
-                                add_event_string_based(event_to_add, "mid", team, trajectory, None)
-                            else:
-                                add_event("risk", risk, team, trajectory, None, items_selected, risk)
-                                # print("_______ added risk event: " + team + " risk: " + risk)
+                            add_event("risk", risk, team, trajectory, None, items_selected, risk)
+                            # print("_______ added risk event: " + team + " risk: " + risk)
 
                 if "gold" in EVENTS_TO_PROCESS and event == "TotalGold":
                     gold_counter = process_gold(row, TOTAL_GOLD_COLUMN, False, gold_counter, team, trajectory, event_sequence)
@@ -595,24 +660,10 @@ def parse_data_to_json_format(csv_reader, data_file):
 
                             # add the round event and avoid updating action sequence because rounds are not team's actions
                             if "round" in EVENTS_TO_PROCESS:
-                                if SIMPLE_STATE_CRITERION:
-                                    event_to_add = "round " + str(round_counter)
-                                    add_event_string_based(event_to_add, "round", team, trajectory, None)
-                                else:
-                                    add_event("round", round_counter, team, trajectory, None, items_selected,
-                                              risk_aversion)
-                                    # print("added round event num: " + str(round_counter))
-                                    # print(">>>>>>>>>> avg_selected_item_success_prob: " + str(avg_selected_item_success_prob))
-                                    # print(">>>>>>>>>> risk_aversion: " + risk_aversion)
-
-                            # add the round+risk event
-                            if "round+risk" in EVENTS_TO_PROCESS and selected_probabilities.__len__() > 0:
-                                if SIMPLE_STATE_CRITERION:
-                                    event_to_add = "round+risk" + str(round_counter) + ": " + str(selected_probabilities)
-                                    add_event_string_based(event_to_add, "mid", team, trajectory, None)
-                                    print("...... ADDED round+risk event: " + str(round_counter) + ": " + str(selected_probabilities))
-                                    # reset the list of selected probabilities
-                                    selected_probabilities = []
+                                add_event("round", round_counter, team, trajectory, None, items_selected, risk_aversion)
+                                # print("added round event num: " + str(round_counter))
+                                # print(">>>>>>>>>> avg_selected_item_success_prob: " + str(avg_selected_item_success_prob))
+                                # print(">>>>>>>>>> risk_aversion: " + risk_aversion)
 
                         round_counter = round_counter + 1
 
@@ -624,9 +675,6 @@ def parse_data_to_json_format(csv_reader, data_file):
                 PROCESS_CURRENT_TEAM = False
                 # print ("!!!!!!!!!!!! Team: " + team + " has GameSuspended!")
 
-                # temporary
-                print_risk_sequences(selected_probabilities)
-
             # if it's end of file, close the graph of the current team if
             # it's in the START state (which means the team is in at least 1 actual state)
             if first_cell == "END" and team in TEAMS and team in STATES[0]['user_ids']:
@@ -637,9 +685,6 @@ def parse_data_to_json_format(csv_reader, data_file):
                 # clear the mining tools
                 MINING_TOOLS.clear()
 
-                # temporary
-                print_risk_sequences(selected_probabilities)
-
     # ------ RETURN RESULTS
     # generate lists from dictionaries
     state_list = list(STATES.values())
@@ -649,7 +694,8 @@ def parse_data_to_json_format(csv_reader, data_file):
     # compute similarities among trajectories (possibly on the basis of simple criteria)
     # ------ FOR JIMMY: next line can be commented and replaced with a call to your function
     # Jimmy test
-    traj_similarity = compute_similarities()
+    # traj_similarity = compute_similarities()
+    traj_similarity = BuildTrajctoriesSimilarity()
 
     # return the results
     return {'level_info': 'Visualization',
@@ -661,12 +707,6 @@ def parse_data_to_json_format(csv_reader, data_file):
             'traj_similarity': traj_similarity,
             'setting': 'test'}
 
-
-def print_risk_sequences(selected_probabilities):
-    if selected_probabilities.__len__() > 0:
-        for prob in selected_probabilities:
-            print(str(prob) + ",", end='')
-        print()
 
 def compute_similarities():
     # compute distances between trajectories
